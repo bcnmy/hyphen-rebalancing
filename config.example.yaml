@@ -1,0 +1,46 @@
+networks:
+  ethereum:
+    chainID: 1
+    rpcURL: https://mainnet.infura.io/v3/<YOUR-PROJECT-ID>
+    defaultGasPrice: 50000000000
+    maxGasPrice: 100000000000
+  bsc:
+    chainID: 56
+    rpcURL: https://bsc-dataseed.binance.org/
+    defaultGasPrice: 10000000000
+    maxGasPrice: 15000000000
+  polygon:
+    chainID: 137
+    rpcURL: https://rpc-mainnet.matic.network
+    defaultGasPrice: 50000000000
+    maxGasPrice: 100000000000
+
+tokens:
+  usdt:
+    addresses:
+      ethereum: 0x0000000000000000000000000000000000000001
+      bsc: 0x0000000000000000000000000000000000000001
+      polygon: 0x0000000000000000000000000000000000000001
+
+accounts:
+  default:
+    privateKey: 0000000000000000000000000000000000000000000000000000000000000001
+
+# List of mirror liquidity pools used for arbitrage
+pools:
+  default:
+    # Liquidity pool addresses for each network that bot wants to operate in
+    addresses:
+      ethereum: 0x0000000000000000000000000000000000000001
+      bsc: 0x0000000000000000000000000000000000000001
+      polygon: 0x0000000000000000000000000000000000000001
+    # Tokens to support in this liquidity pool
+    tokens: [usdt]
+    # Accounts to use for arbitrage in this liquidity pool
+    accounts: [default]
+    # Optional. Minimal percentage of profitability in tokens after arbitrage transaction, including gas costs on sender side.
+    profitabilityThreshold: 2.5
+    # Optional. Enable infinite approve for arbitrage transactions. Could help to speed up reward acquisition.
+    infiniteApprove: true
+    # Optional. Cancel transaction if arbitrage transaction from other bot was mined before us (because of higher gas price, better network conditions or MEV activity).
+    cancelOnFail: true
