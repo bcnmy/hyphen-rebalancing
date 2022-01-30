@@ -20,10 +20,10 @@ type Config struct {
 }
 
 type Network struct {
-	ChainID         uint64  `yaml:"chainID"`
-	RPCURL          string  `yaml:"rpcURL"`
-	DefaultGasPrice big.Int `yaml:"defaultGasPrice"`
-	MaxGasPrice     big.Int `yaml:"maxGasPrice"`
+	ChainID         uint64   `yaml:"chainID"`
+	RPCURL          string   `yaml:"rpcURL"`
+	DefaultGasPrice *big.Int `yaml:"defaultGasPrice"`
+	MaxGasPrice     *big.Int `yaml:"maxGasPrice"`
 }
 
 type Token struct {
@@ -54,6 +54,7 @@ func (a *Address) UnmarshalYAML(value *yaml.Node) error {
 		return errors.New("invalid address")
 	}
 
+	a.Value = address
 	return nil
 }
 

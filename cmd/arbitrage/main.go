@@ -48,6 +48,8 @@ func main() {
 
 	go func() {
 		sig := <-sigs
+
+		fmt.Println()
 		level.Info(logger).Log("msg", fmt.Sprintf("got %v signal, stopping", sig))
 		cancel()
 	}()

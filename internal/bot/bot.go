@@ -49,25 +49,23 @@ type bot struct {
 
 func (b *bot) Run(ctx context.Context) error {
 	for _, p := range b.mgr.Pools() {
+		b.poolWg.Add(1)
 		go b.processPool(ctx, p)
 	}
 
-	<-ctx.Done()
-	close(b.running)
 	b.poolWg.Wait()
 
 	return nil
 }
 
 func (b *bot) Stop(ctx context.Context) error {
-	<-ctx.Done()
+	close(b.running)
+	b.poolWg.Wait()
 	return nil
 }
 
 func (b *bot) processPool(ctx context.Context, p pool.Pool) {
-	level.Info(b.logger).Log("network", p.NetworkName(), "msg", "starting processing pool")
-
-	b.poolWg.Add(1)
+	level.Info(b.logger).Log("msg", "starting processing pool", "network", p.NetworkName())
 	defer b.poolWg.Done()
 
 	dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
@@ -75,7 +73,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 
 	client, err := p.Dial(dialCtx)
 	if err != nil {
-		level.Error(b.logger).Log("msg", "unable to create EVM client for pool", "err", err)
+		level.Error(b.logger).Log("msg", "unable to create EVM client for pool", "err", err, "network", p.NetworkName())
 		return
 	}
 
@@ -88,13 +86,15 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 			if closed {
 				return
 			}
+		case <-ctx.Done():
+			return
 		case <-jobs:
 			jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
 			defer cancel()
 
 			err = b.processPoolJob(jobCtx, client, p)
 			if err != nil {
-				level.Error(b.logger).Log("msg", "unable to process pool job", "err", err)
+				level.Error(b.logger).Log("msg", "unable to process pool job", "err", err, "network", p.NetworkName())
 				return
 			}
 		}
@@ -102,7 +102,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 }
 
 func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p pool.Pool) error {
-	level.Info(b.logger).Log("network", p.NetworkName(), "msg", "processing new pool job")
+	level.Info(b.logger).Log("msg", "processing new pool job", "network", p.NetworkName())
 	erc20Contract, err := erc20.NewErc20(p.Token(), client)
 	if err != nil {
 		return err
@@ -116,9 +116,9 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 		return err
 	}
 
-	level.Debug(b.logger).Log("network", p.NetworkName(), "msg", fmt.Sprintf("token balance: %s", balance.String()))
+	level.Debug(b.logger).Log("msg", fmt.Sprintf("token balance: %s", balance.String()), "network", p.NetworkName())
 
-	_, err = b.calculateProfitability(client, p, *balance)
+	_, err = b.calculateProfitability(client, p, balance)
 	if err != nil {
 		return err
 	}
@@ -126,13 +126,17 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 	return nil
 }
 
-func (b *bot) calculateProfitability(client *ethclient.Client, p pool.Pool, maxDeposit big.Int) (*profitability, error) {
+func (b *bot) calculateProfitability(client *ethclient.Client, p pool.Pool, maxDeposit *big.Int) (*profitabilityEstimate, error) {
 	// TODO: Implementation
-	return &profitability{}, nil
+	return &profitabilityEstimate{
+		deposit:  big.NewInt(0),
+		reward:   big.NewInt(0),
+		gasPrice: big.NewInt(0),
+	}, nil
 }
 
-type profitability struct {
-	deposit  big.Int
-	reward   big.Int
-	gasPrice big.Int
+type profitabilityEstimate struct {
+	deposit  *big.Int
+	reward   *big.Int
+	gasPrice *big.Int
 }
