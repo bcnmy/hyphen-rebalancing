@@ -1,18 +1,17 @@
 package pool
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 
 	"github.com/bcnmy/hyphen-arbitrage/internal/config"
 )
 
+// Manager contains several interconnected liquidity pools on different chains
 type Manager interface {
 	PoolName() string
 	TokenName() string
@@ -21,14 +20,6 @@ type Manager interface {
 	PrivateKey() *ecdsa.PrivateKey
 	PublicKey() *ecdsa.PublicKey
 	Pools() []Pool
-	Run(context.Context)
-}
-
-type Pool interface {
-	NetworkName() string
-	ChainID() uint64
-	Token() common.Address
-	Address() common.Address
 }
 
 func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
@@ -85,13 +76,6 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 					})
 				}
 
-				mgr.logger = log.With(
-					logger,
-					"pool", mgr.PoolName(),
-					"account", mgr.AccountName(),
-					"token", mgr.TokenName(),
-				)
-
 				result = append(result, mgr)
 			}
 		}
@@ -101,7 +85,6 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 }
 
 type manager struct {
-	logger      log.Logger
 	poolName    string
 	tokenName   string
 	accountName string
@@ -135,33 +118,4 @@ func (m *manager) PublicKey() *ecdsa.PublicKey {
 
 func (m *manager) Pools() []Pool {
 	return m.pools
-}
-
-func (m *manager) Run(ctx context.Context) {
-	level.Info(m.logger).Log("msg", "starting pool manager")
-	<-ctx.Done()
-	level.Info(m.logger).Log("msg", "stopping pool manager")
-}
-
-type pool struct {
-	networkName string
-	network     config.Network
-	token       common.Address
-	address     common.Address
-}
-
-func (p *pool) NetworkName() string {
-	return p.networkName
-}
-
-func (p *pool) ChainID() uint64 {
-	return p.network.ChainID
-}
-
-func (p *pool) Token() common.Address {
-	return p.token
-}
-
-func (p *pool) Address() common.Address {
-	return p.address
 }

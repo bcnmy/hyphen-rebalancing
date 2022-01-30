@@ -11,6 +11,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 
+	"github.com/bcnmy/hyphen-arbitrage/internal/bot"
 	"github.com/bcnmy/hyphen-arbitrage/internal/config"
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
 )
@@ -18,8 +19,9 @@ import (
 func main() {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stdout))
 
-	level.Info(logger).Log("msg", "reading config", "file", configFile())
-	conf, err := config.FromFile(configFile())
+	cfgFile := getConfigFile()
+	level.Info(logger).Log("msg", "reading config", "file", cfgFile)
+	conf, err := config.FromFile(cfgFile)
 	if err != nil {
 		panic(err)
 	}
@@ -37,17 +39,9 @@ func main() {
 		panic(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
-
-	for _, mgr := range poolManagers {
-		wg.Add(1)
-
-		go func(mgr pool.Manager) {
-			mgr.Run(ctx)
-			wg.Done()
-		}(mgr)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runBots(ctx, poolManagers, &wg, logger)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -61,7 +55,29 @@ func main() {
 	wg.Wait()
 }
 
-func configFile() string {
+func runBots(ctx context.Context, poolManagers []pool.Manager, wg *sync.WaitGroup, logger log.Logger) {
+	for _, mgr := range poolManagers {
+		wg.Add(1)
+
+		go func(mgr pool.Manager) {
+			defer wg.Done()
+
+			bot, err := bot.New(mgr, logger)
+			if err != nil {
+				level.Error(logger).Log("msg", "unable to create bot", "err", err)
+				return
+			}
+
+			err = bot.Run(ctx)
+			if err != nil {
+				level.Error(logger).Log("msg", "bot running failure", "err", err)
+				return
+			}
+		}(mgr)
+	}
+}
+
+func getConfigFile() string {
 	if filename, ok := os.LookupEnv("CONFIG_FILE"); ok {
 		return filename
 	}
