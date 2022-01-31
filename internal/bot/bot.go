@@ -12,8 +12,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/erc20"
-	"github.com/bcnmy/hyphen-arbitrage/internal/hyphen"
+	"github.com/bcnmy/hyphen-arbitrage/internal/generated/erc20"
+	"github.com/bcnmy/hyphen-arbitrage/internal/generated/hyphen"
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
 )
 
