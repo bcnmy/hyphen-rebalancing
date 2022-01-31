@@ -35,12 +35,17 @@ type Account struct {
 }
 
 type Pool struct {
-	Tokens                 []string           `yaml:"tokens"`
-	Accounts               []string           `yaml:"accounts"`
-	Addresses              map[string]Address `yaml:"addresses"`
-	ProfitabilityThreshold float64            `yaml:"profitabilityThreshold"`
-	InfiniteApprove        bool               `yaml:"infiniteApprove"`
-	CancelOnFail           bool               `yaml:"cancelOnFail"`
+	Tokens                 []string                 `yaml:"tokens"`
+	Accounts               []string                 `yaml:"accounts"`
+	Addresses              map[string]PoolAddresses `yaml:"addresses"`
+	ProfitabilityThreshold float64                  `yaml:"profitabilityThreshold"`
+	InfiniteApprove        bool                     `yaml:"infiniteApprove"`
+	CancelOnFail           bool                     `yaml:"cancelOnFail"`
+}
+
+type PoolAddresses struct {
+	Pool      Address `yaml:"pool"`
+	Providers Address `yaml:"providers"`
 }
 
 type Address struct {

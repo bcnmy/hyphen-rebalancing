@@ -13,6 +13,7 @@ import (
 	"github.com/go-kit/log/level"
 
 	"github.com/bcnmy/hyphen-arbitrage/internal/erc20"
+	"github.com/bcnmy/hyphen-arbitrage/internal/hyphen"
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
 )
 
@@ -29,11 +30,8 @@ type Bot interface {
 
 func New(mgr pool.Manager, logger log.Logger) (Bot, error) {
 	return &bot{
-		mgr: mgr,
-		logger: log.With(
-			logger,
-			"mgr", fmt.Sprintf("%s:%s:%s", mgr.PoolName(), mgr.AccountName(), mgr.TokenName()),
-		),
+		mgr:    mgr,
+		logger: logger,
 
 		running: make(chan bool),
 	}, nil
@@ -94,7 +92,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 
 			err = b.processPoolJob(jobCtx, client, p)
 			if err != nil {
-				level.Error(b.logger).Log("msg", "unable to process pool job", "err", err, "network", p.NetworkName())
+				level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to process pool job", "err", err)
 				return
 			}
 		}
@@ -102,7 +100,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 }
 
 func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p pool.Pool) error {
-	level.Info(b.logger).Log("msg", "processing new pool job", "network", p.NetworkName())
+	level.Info(b.logger).Log("pool", b.poolID(p), "msg", "processing new pool job")
 	erc20Contract, err := erc20.NewErc20(p.Token(), client)
 	if err != nil {
 		return err
@@ -116,27 +114,71 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 		return err
 	}
 
-	level.Debug(b.logger).Log("msg", fmt.Sprintf("token balance: %s", balance.String()), "network", p.NetworkName())
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", fmt.Sprintf("token balance: %s", balance.String()))
 
-	_, err = b.calculateProfitability(client, p, balance)
+	// Implementation draft:
+	// 1. Check if pool is in deficit state
+	// 2. Calculate liquidityDeficit = lProv.suppliedLiquidity - lPool.currentLiquidity ✅
+	// 3. Calculate deposit = min(maxDeposit, liquidityDeficit) ✅
+	// 4. Calculate rewards = lPool.getRewardAmount(deposit) ✅
+	// 5. Calculate deposit gas fees
+	// 6. Calculate send gas fees
+	// 7. Calculate gas transter fees on destination chain
+
+	potentialRewards, err := b.calculatePotentialRewards(ctx, client, p, balance)
 	if err != nil {
 		return err
 	}
 
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", potentialRewards.deposit, "rewards", potentialRewards.rewards)
+
 	return nil
 }
 
-func (b *bot) calculateProfitability(client *ethclient.Client, p pool.Pool, maxDeposit *big.Int) (*profitabilityEstimate, error) {
-	// TODO: Implementation
-	return &profitabilityEstimate{
-		deposit:  big.NewInt(0),
-		reward:   big.NewInt(0),
-		gasPrice: big.NewInt(0),
+func (b *bot) calculatePotentialRewards(ctx context.Context, client *ethclient.Client, p pool.Pool, maxDeposit *big.Int) (*rewardsEstimate, error) {
+	liquidityPool, err := hyphen.NewLiquidityPool(p.Address(), client)
+	if err != nil {
+		return nil, err
+	}
+
+	liquidityProviders, err := hyphen.NewLiquidityProviders(p.Providers(), client)
+	if err != nil {
+		return nil, err
+	}
+
+	currentLiquidity, err := liquidityPool.GetCurrentLiquidity(&bind.CallOpts{}, p.Token())
+	if err != nil {
+		return nil, err
+	}
+
+	suppliedLiquidity, err := liquidityProviders.GetSuppliedLiquidityByToken(&bind.CallOpts{}, p.Token())
+	if err != nil {
+		return nil, err
+	}
+
+	liquidityDeficit := big.NewInt(0).Sub(suppliedLiquidity, currentLiquidity)
+
+	minimalProfitableDeposit := liquidityDeficit
+	if liquidityDeficit.Cmp(maxDeposit) > 0 {
+		minimalProfitableDeposit = maxDeposit
+	}
+
+	potentialRewards, err := liquidityPool.GetRewardAmount(&bind.CallOpts{}, minimalProfitableDeposit, p.Token())
+	if err != nil {
+		return nil, err
+	}
+
+	return &rewardsEstimate{
+		deposit: minimalProfitableDeposit,
+		rewards: potentialRewards,
 	}, nil
 }
 
-type profitabilityEstimate struct {
-	deposit  *big.Int
-	reward   *big.Int
-	gasPrice *big.Int
+func (b *bot) poolID(p pool.Pool) string {
+	return fmt.Sprintf("%s:%s:%s:%s", b.mgr.PoolName(), b.mgr.AccountName(), b.mgr.TokenName(), p.NetworkName())
+}
+
+type rewardsEstimate struct {
+	deposit *big.Int
+	rewards *big.Int
 }

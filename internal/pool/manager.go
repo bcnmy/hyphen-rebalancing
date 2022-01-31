@@ -57,7 +57,7 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 				mgr.privateKey = accountConf.PrivateKey.Value
 				mgr.pools = []Pool{}
 
-				for networkName, poolAddress := range poolConf.Addresses {
+				for networkName, poolAddresses := range poolConf.Addresses {
 					networkConf, ok := conf.Networks[networkName]
 					if !ok {
 						return nil, fmt.Errorf("pool config '%s' contains address for unknown network '%s'", poolName, networkName)
@@ -72,7 +72,8 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 						networkName: networkName,
 						network:     networkConf,
 						token:       tokenAddress.Value,
-						address:     poolAddress.Value,
+						address:     poolAddresses.Pool.Value,
+						providers:   poolAddresses.Providers.Value,
 					})
 				}
 
