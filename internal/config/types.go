@@ -20,7 +20,7 @@ type Config struct {
 }
 
 type Network struct {
-	ChainID         uint64   `yaml:"chainID"`
+	ChainID         *big.Int `yaml:"chainID"`
 	RPCURL          string   `yaml:"rpcURL"`
 	DefaultGasPrice *big.Int `yaml:"defaultGasPrice"`
 	MaxGasPrice     *big.Int `yaml:"maxGasPrice"`

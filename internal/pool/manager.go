@@ -13,13 +13,15 @@ import (
 
 // Manager contains several interconnected liquidity pools on different chains
 type Manager interface {
+	Pools() []Pool
+	PrivateKey() *ecdsa.PrivateKey
+	PublicKey() *ecdsa.PublicKey
+	AccountAddress() common.Address
+	InfiniteApprove() bool
+
 	PoolName() string
 	TokenName() string
 	AccountName() string
-	AccountAddress() common.Address
-	PrivateKey() *ecdsa.PrivateKey
-	PublicKey() *ecdsa.PublicKey
-	Pools() []Pool
 }
 
 func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
@@ -51,11 +53,13 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 				}
 
 				mgr := new(manager)
+				mgr.pools = []Pool{}
+				mgr.privateKey = accountConf.PrivateKey.Value
+				mgr.infiniteApprove = poolConf.InfiniteApprove
+
 				mgr.poolName = poolName
 				mgr.tokenName = tokenName
 				mgr.accountName = accountName
-				mgr.privateKey = accountConf.PrivateKey.Value
-				mgr.pools = []Pool{}
 
 				for networkName, poolAddresses := range poolConf.Addresses {
 					networkConf, ok := conf.Networks[networkName]
@@ -86,27 +90,17 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 }
 
 type manager struct {
+	pools           []Pool
+	privateKey      *ecdsa.PrivateKey
+	infiniteApprove bool
+
 	poolName    string
 	tokenName   string
 	accountName string
-	privateKey  *ecdsa.PrivateKey
-	pools       []Pool
 }
 
-func (m *manager) PoolName() string {
-	return m.poolName
-}
-
-func (m *manager) TokenName() string {
-	return m.tokenName
-}
-
-func (m *manager) AccountName() string {
-	return m.accountName
-}
-
-func (m *manager) AccountAddress() common.Address {
-	return crypto.PubkeyToAddress(m.privateKey.PublicKey)
+func (m *manager) Pools() []Pool {
+	return m.pools
 }
 
 func (m *manager) PrivateKey() *ecdsa.PrivateKey {
@@ -117,6 +111,22 @@ func (m *manager) PublicKey() *ecdsa.PublicKey {
 	return &m.privateKey.PublicKey
 }
 
-func (m *manager) Pools() []Pool {
-	return m.pools
+func (m *manager) AccountAddress() common.Address {
+	return crypto.PubkeyToAddress(m.privateKey.PublicKey)
+}
+
+func (m *manager) InfiniteApprove() bool {
+	return m.infiniteApprove
+}
+
+func (m *manager) AccountName() string {
+	return m.accountName
+}
+
+func (m *manager) PoolName() string {
+	return m.poolName
+}
+
+func (m *manager) TokenName() string {
+	return m.tokenName
 }

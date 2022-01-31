@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-kit/log"
@@ -93,7 +95,6 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 			err = b.processPoolJob(jobCtx, client, p)
 			if err != nil {
 				level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to process pool job", "err", err)
-				return
 			}
 		}
 	}
@@ -114,7 +115,15 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 		return err
 	}
 
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", fmt.Sprintf("token balance: %s", balance.String()))
+	allowance, err := erc20Contract.Allowance(&bind.CallOpts{
+		Context: ctx,
+	}, b.mgr.AccountAddress(), p.Address())
+
+	if err != nil {
+		return err
+	}
+
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "fetched token balance", "balance", balance, "allowance", allowance)
 
 	// Implementation draft:
 	// 1. Check if pool is in deficit state
@@ -130,13 +139,63 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 		return err
 	}
 
-	rewardPercentage := new(big.Float)
-	if potentialReward.deposit.Cmp(new(big.Int)) > 0 && potentialReward.reward.Cmp(new(big.Int)) > 0 {
-		rewardPercentage.Quo(new(big.Float).SetInt(potentialReward.reward), new(big.Float).SetInt(potentialReward.deposit))
-		rewardPercentage.Mul(rewardPercentage, big.NewFloat(100))
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", potentialReward.deposit, "reward", potentialReward.reward, "percentage", potentialReward.rewardPercentage)
+
+	if potentialReward.reward.Cmp(big.NewInt(0)) <= 0 || potentialReward.deposit.Cmp(new(big.Int)) <= 0 {
+		level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "not enough rewards")
+		return nil
 	}
 
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", potentialReward.deposit, "reward", potentialReward.reward, "percentage", rewardPercentage)
+	opts, err := bind.NewKeyedTransactorWithChainID(b.mgr.PrivateKey(), p.ChainID())
+	if err != nil {
+		return err
+	}
+
+	if allowance.Cmp(potentialReward.deposit) < 0 {
+		amount := potentialReward.deposit
+		if b.mgr.InfiniteApprove() {
+			amount = abi.MaxUint256
+		}
+
+		tx, err := erc20Contract.Approve(opts, p.Address(), amount)
+		if err != nil {
+			return err
+		}
+
+		level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "approved liquidity pool spending", "amount", amount, "tx", tx.Hash())
+	}
+
+	// TODO: erc20Contract.Approve(&bind.TransactOpts{})
+
+	liquidityPoolAbi := &abi.ABI{}
+	err = liquidityPoolAbi.UnmarshalJSON([]byte(hyphen.LiquidityPoolABI))
+	if err != nil {
+		return err
+	}
+
+	var args []interface{}
+	args = append(args, big.NewInt(0), p.Token(), b.mgr.AccountAddress(), potentialReward.deposit, "tag")
+	input, err := liquidityPoolAbi.Pack("depositErc20", args...)
+	if err != nil {
+		return err
+	}
+
+	sendTo := p.Address()
+	callMsg := ethereum.CallMsg{
+		From:     b.mgr.AccountAddress(),
+		To:       &sendTo,
+		Gas:      0,
+		GasPrice: big.NewInt(0),
+		Value:    big.NewInt(0),
+		Data:     input,
+	}
+
+	gasLimit, err := client.EstimateGas(ctx, callMsg)
+	if err != nil {
+		return err
+	}
+
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", fmt.Sprintf("gas limit: %d", gasLimit))
 
 	return nil
 }
@@ -164,27 +223,35 @@ func (b *bot) calculatePotentialRewards(ctx context.Context, client *ethclient.C
 
 	liquidityDeficit := big.NewInt(0).Sub(suppliedLiquidity, currentLiquidity)
 
-	minimalProfitableDeposit := liquidityDeficit
+	deposit := liquidityDeficit
 	if liquidityDeficit.Cmp(maxDeposit) > 0 {
-		minimalProfitableDeposit = maxDeposit
+		deposit = maxDeposit
 	}
 
-	potentialReward, err := liquidityPool.GetRewardAmount(&bind.CallOpts{}, minimalProfitableDeposit, p.Token())
+	reward, err := liquidityPool.GetRewardAmount(&bind.CallOpts{}, deposit, p.Token())
 	if err != nil {
 		return nil, err
 	}
 
+	rewardPercentage := new(big.Float)
+	if deposit.Cmp(new(big.Int)) > 0 && reward.Cmp(new(big.Int)) > 0 {
+		rewardPercentage.Quo(new(big.Float).SetInt(reward), new(big.Float).SetInt(deposit))
+		rewardPercentage.Mul(rewardPercentage, big.NewFloat(100))
+	}
+
 	return &rewardsEstimate{
-		deposit: minimalProfitableDeposit,
-		reward:  potentialReward,
+		deposit:          deposit,
+		reward:           reward,
+		rewardPercentage: rewardPercentage,
 	}, nil
 }
 
 func (b *bot) poolID(p pool.Pool) string {
-	return fmt.Sprintf("%s:%s:%s:%s", b.mgr.PoolName(), b.mgr.AccountName(), b.mgr.TokenName(), p.NetworkName())
+	return fmt.Sprintf("%s:%s:%s:%s:%s", b.mgr.PoolName(), b.mgr.AccountName(), b.mgr.TokenName(), p.NetworkName(), p.ChainID().String())
 }
 
 type rewardsEstimate struct {
-	deposit *big.Int
-	reward  *big.Int
+	deposit          *big.Int
+	reward           *big.Int
+	rewardPercentage *big.Float
 }

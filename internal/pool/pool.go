@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -11,31 +12,29 @@ import (
 
 // Pool represents single liquidity pool on chain
 type Pool interface {
-	NetworkName() string
 	Dial(context.Context) (*ethclient.Client, error)
-	ChainID() uint64
+	ChainID() *big.Int
 	Token() common.Address
 	Address() common.Address
 	Providers() common.Address
+
+	NetworkName() string
 }
 
 type pool struct {
-	networkName string
-	network     config.Network
-	token       common.Address
-	address     common.Address
-	providers   common.Address
-}
+	network   config.Network
+	token     common.Address
+	address   common.Address
+	providers common.Address
 
-func (p *pool) NetworkName() string {
-	return p.networkName
+	networkName string
 }
 
 func (p *pool) Dial(ctx context.Context) (*ethclient.Client, error) {
 	return ethclient.DialContext(ctx, p.network.RPCURL)
 }
 
-func (p *pool) ChainID() uint64 {
+func (p *pool) ChainID() *big.Int {
 	return p.network.ChainID
 }
 
@@ -49,4 +48,8 @@ func (p *pool) Address() common.Address {
 
 func (p *pool) Providers() common.Address {
 	return p.providers
+}
+
+func (p *pool) NetworkName() string {
+	return p.networkName
 }
