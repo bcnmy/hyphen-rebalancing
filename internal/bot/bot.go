@@ -125,12 +125,18 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 	// 6. Calculate send gas fees
 	// 7. Calculate gas transter fees on destination chain
 
-	potentialRewards, err := b.calculatePotentialRewards(ctx, client, p, balance)
+	potentialReward, err := b.calculatePotentialRewards(ctx, client, p, balance)
 	if err != nil {
 		return err
 	}
 
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", potentialRewards.deposit, "rewards", potentialRewards.rewards)
+	rewardPercentage := new(big.Float)
+	if potentialReward.deposit.Cmp(new(big.Int)) > 0 && potentialReward.reward.Cmp(new(big.Int)) > 0 {
+		rewardPercentage.Quo(new(big.Float).SetInt(potentialReward.reward), new(big.Float).SetInt(potentialReward.deposit))
+		rewardPercentage.Mul(rewardPercentage, big.NewFloat(100))
+	}
+
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", potentialReward.deposit, "reward", potentialReward.reward, "percentage", rewardPercentage)
 
 	return nil
 }
@@ -163,14 +169,14 @@ func (b *bot) calculatePotentialRewards(ctx context.Context, client *ethclient.C
 		minimalProfitableDeposit = maxDeposit
 	}
 
-	potentialRewards, err := liquidityPool.GetRewardAmount(&bind.CallOpts{}, minimalProfitableDeposit, p.Token())
+	potentialReward, err := liquidityPool.GetRewardAmount(&bind.CallOpts{}, minimalProfitableDeposit, p.Token())
 	if err != nil {
 		return nil, err
 	}
 
 	return &rewardsEstimate{
 		deposit: minimalProfitableDeposit,
-		rewards: potentialRewards,
+		reward:  potentialReward,
 	}, nil
 }
 
@@ -180,5 +186,5 @@ func (b *bot) poolID(p pool.Pool) string {
 
 type rewardsEstimate struct {
 	deposit *big.Int
-	rewards *big.Int
+	reward  *big.Int
 }
