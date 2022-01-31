@@ -18,7 +18,7 @@ import (
 )
 
 const connectionTimeout = time.Second * 15
-const jobTimeout = time.Second * 15
+const jobTimeout = time.Second * 30
 
 type Bot interface {
 	// Starts bot worker
