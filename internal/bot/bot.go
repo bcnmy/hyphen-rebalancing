@@ -23,19 +23,13 @@ const connectionTimeout = time.Second * 15
 const jobTimeout = time.Second * 30
 
 type Bot interface {
-	// Starts bot worker
 	Run(ctx context.Context) error
-
-	// Gracefully stops bot worker
-	Stop(ctx context.Context) error
 }
 
 func New(mgr pool.Manager, logger log.Logger) (Bot, error) {
 	return &bot{
 		mgr:    mgr,
 		logger: logger,
-
-		running: make(chan bool),
 	}, nil
 }
 
@@ -43,8 +37,7 @@ type bot struct {
 	mgr    pool.Manager
 	logger log.Logger
 
-	running chan bool
-	poolWg  sync.WaitGroup
+	poolWg sync.WaitGroup
 }
 
 func (b *bot) Run(ctx context.Context) error {
@@ -55,12 +48,6 @@ func (b *bot) Run(ctx context.Context) error {
 
 	b.poolWg.Wait()
 
-	return nil
-}
-
-func (b *bot) Stop(ctx context.Context) error {
-	close(b.running)
-	b.poolWg.Wait()
 	return nil
 }
 
@@ -82,10 +69,6 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 
 	for {
 		select {
-		case _, closed := <-b.running:
-			if closed {
-				return
-			}
 		case <-ctx.Done():
 			return
 		case <-jobs:
@@ -101,83 +84,117 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool) {
 }
 
 func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p pool.Pool) error {
-	level.Info(b.logger).Log("pool", b.poolID(p), "msg", "processing new pool job")
-	erc20Contract, err := erc20.NewErc20(p.Token(), client)
-	if err != nil {
-		return err
-	}
-
-	balance, err := erc20Contract.BalanceOf(&bind.CallOpts{
-		Context: ctx,
-	}, b.mgr.AccountAddress())
-
-	if err != nil {
-		return err
-	}
-
-	allowance, err := erc20Contract.Allowance(&bind.CallOpts{
-		Context: ctx,
-	}, b.mgr.AccountAddress(), p.Address())
-
+	balance, allowance, err := b.getBalanceAndAllowance(ctx, client, p)
 	if err != nil {
 		return err
 	}
 
 	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "fetched token balance", "balance", balance, "allowance", allowance)
 
-	// Implementation draft:
-	// 1. Check if pool is in deficit state
-	// 2. Calculate liquidityDeficit = lProv.suppliedLiquidity - lPool.currentLiquidity ✅
-	// 3. Calculate deposit = min(maxDeposit, liquidityDeficit) ✅
-	// 4. Calculate rewards = lPool.getRewardAmount(deposit) ✅
-	// 5. Calculate deposit gas fees
-	// 6. Calculate send gas fees
-	// 7. Calculate gas transter fees on destination chain
-
-	potentialReward, err := b.calculatePotentialRewards(ctx, client, p, balance)
+	deposit, reward, err := b.estimateDepositAndReward(ctx, client, p, balance)
 	if err != nil {
 		return err
 	}
 
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", potentialReward.deposit, "reward", potentialReward.reward, "percentage", potentialReward.rewardPercentage)
-
-	if potentialReward.reward.Cmp(big.NewInt(0)) <= 0 || potentialReward.deposit.Cmp(new(big.Int)) <= 0 {
-		level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "not enough rewards")
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", deposit, "reward", reward)
+	if reward.Cmp(big.NewInt(0)) <= 0 {
 		return nil
 	}
 
-	opts, err := bind.NewKeyedTransactorWithChainID(b.mgr.PrivateKey(), p.ChainID())
-	if err != nil {
-		return err
-	}
-
-	if allowance.Cmp(potentialReward.deposit) < 0 {
-		amount := potentialReward.deposit
+	if allowance.Cmp(deposit) < 0 {
+		amount := deposit
 		if b.mgr.InfiniteApprove() {
 			amount = abi.MaxUint256
 		}
 
-		tx, err := erc20Contract.Approve(opts, p.Address(), amount)
+		err = b.setAllowance(ctx, client, p, amount)
 		if err != nil {
 			return err
 		}
-
-		level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "approved liquidity pool spending", "amount", amount, "tx", tx.Hash())
 	}
 
-	// TODO: erc20Contract.Approve(&bind.TransactOpts{})
-
-	liquidityPoolAbi := &abi.ABI{}
-	err = liquidityPoolAbi.UnmarshalJSON([]byte(hyphen.LiquidityPoolABI))
+	gasLimit, err := b.estimateDepositGas(ctx, client, p, deposit)
 	if err != nil {
 		return err
+	}
+
+	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", fmt.Sprintf("gas limit: %d", gasLimit))
+
+	return nil
+}
+
+func (b *bot) setAllowance(ctx context.Context, client *ethclient.Client, p pool.Pool, amount *big.Int) error {
+	erc20Contract, err := erc20.NewErc20(p.Token(), client)
+	if err != nil {
+		return err
+	}
+
+	opts, err := b.newTransactor(ctx, p.ChainID())
+	if err != nil {
+		return err
+	}
+
+	tx, err := erc20Contract.Approve(opts, p.Address(), amount)
+	if err != nil {
+		return err
+	}
+
+	_, err = bind.WaitMined(ctx, client, tx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (b *bot) estimateDepositAndReward(ctx context.Context, client *ethclient.Client, p pool.Pool, maxDeposit *big.Int) (*big.Int, *big.Int, error) {
+	liquidityPool, err := hyphen.NewLiquidityPool(p.Address(), client)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	liquidityProviders, err := hyphen.NewLiquidityProviders(p.Providers(), client)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	currentLiquidity, err := liquidityPool.GetCurrentLiquidity(b.newCallOpts(ctx), p.Token())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	suppliedLiquidity, err := liquidityProviders.GetSuppliedLiquidityByToken(b.newCallOpts(ctx), p.Token())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	liquidityDeficit := big.NewInt(0).Sub(suppliedLiquidity, currentLiquidity)
+
+	deposit := liquidityDeficit
+	if liquidityDeficit.Cmp(maxDeposit) > 0 {
+		deposit = maxDeposit
+	}
+
+	reward, err := liquidityPool.GetRewardAmount(b.newCallOpts(ctx), deposit, p.Token())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return deposit, reward, nil
+}
+
+func (b *bot) estimateDepositGas(ctx context.Context, client *ethclient.Client, p pool.Pool, deposit *big.Int) (uint64, error) {
+	liquidityPoolAbi := &abi.ABI{}
+	err := liquidityPoolAbi.UnmarshalJSON([]byte(hyphen.LiquidityPoolABI))
+	if err != nil {
+		return 0, err
 	}
 
 	var args []interface{}
-	args = append(args, big.NewInt(0), p.Token(), b.mgr.AccountAddress(), potentialReward.deposit, "tag")
+	args = append(args, big.NewInt(0), p.Token(), b.mgr.AccountAddress(), deposit, "tag")
 	input, err := liquidityPoolAbi.Pack("depositErc20", args...)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	sendTo := p.Address()
@@ -190,68 +207,44 @@ func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p po
 		Data:     input,
 	}
 
-	gasLimit, err := client.EstimateGas(ctx, callMsg)
-	if err != nil {
-		return err
-	}
-
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", fmt.Sprintf("gas limit: %d", gasLimit))
-
-	return nil
+	return client.EstimateGas(ctx, callMsg)
 }
 
-func (b *bot) calculatePotentialRewards(ctx context.Context, client *ethclient.Client, p pool.Pool, maxDeposit *big.Int) (*rewardsEstimate, error) {
-	liquidityPool, err := hyphen.NewLiquidityPool(p.Address(), client)
+func (b *bot) getBalanceAndAllowance(ctx context.Context, client *ethclient.Client, p pool.Pool) (*big.Int, *big.Int, error) {
+	erc20Contract, err := erc20.NewErc20(p.Token(), client)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	balance, err := erc20Contract.BalanceOf(b.newCallOpts(ctx), b.mgr.AccountAddress())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	allowance, err := erc20Contract.Allowance(b.newCallOpts(ctx), b.mgr.AccountAddress(), p.Address())
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return balance, allowance, nil
+}
+
+func (b *bot) newTransactor(ctx context.Context, chainId *big.Int) (*bind.TransactOpts, error) {
+	opts, err := bind.NewKeyedTransactorWithChainID(b.mgr.PrivateKey(), chainId)
 	if err != nil {
 		return nil, err
 	}
 
-	liquidityProviders, err := hyphen.NewLiquidityProviders(p.Providers(), client)
-	if err != nil {
-		return nil, err
-	}
+	opts.Context = ctx
 
-	currentLiquidity, err := liquidityPool.GetCurrentLiquidity(&bind.CallOpts{}, p.Token())
-	if err != nil {
-		return nil, err
-	}
+	return opts, nil
+}
 
-	suppliedLiquidity, err := liquidityProviders.GetSuppliedLiquidityByToken(&bind.CallOpts{}, p.Token())
-	if err != nil {
-		return nil, err
-	}
-
-	liquidityDeficit := big.NewInt(0).Sub(suppliedLiquidity, currentLiquidity)
-
-	deposit := liquidityDeficit
-	if liquidityDeficit.Cmp(maxDeposit) > 0 {
-		deposit = maxDeposit
-	}
-
-	reward, err := liquidityPool.GetRewardAmount(&bind.CallOpts{}, deposit, p.Token())
-	if err != nil {
-		return nil, err
-	}
-
-	rewardPercentage := new(big.Float)
-	if deposit.Cmp(new(big.Int)) > 0 && reward.Cmp(new(big.Int)) > 0 {
-		rewardPercentage.Quo(new(big.Float).SetInt(reward), new(big.Float).SetInt(deposit))
-		rewardPercentage.Mul(rewardPercentage, big.NewFloat(100))
-	}
-
-	return &rewardsEstimate{
-		deposit:          deposit,
-		reward:           reward,
-		rewardPercentage: rewardPercentage,
-	}, nil
+func (b *bot) newCallOpts(ctx context.Context) *bind.CallOpts {
+	return &bind.CallOpts{Context: ctx}
 }
 
 func (b *bot) poolID(p pool.Pool) string {
 	return fmt.Sprintf("%s:%s:%s:%s:%s", b.mgr.PoolName(), b.mgr.AccountName(), b.mgr.TokenName(), p.NetworkName(), p.ChainID().String())
-}
-
-type rewardsEstimate struct {
-	deposit          *big.Int
-	reward           *big.Int
-	rewardPercentage *big.Float
 }
