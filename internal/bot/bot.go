@@ -19,8 +19,8 @@ import (
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
 )
 
-const connectionTimeout = time.Second * 15
-const jobTimeout = time.Second * 30
+const connectionTimeout = time.Second * 30
+const jobTimeout = time.Second * 60
 
 type Bot interface {
 	Run(ctx context.Context) error
@@ -33,94 +33,149 @@ func New(mgr pool.Manager, logger log.Logger) (Bot, error) {
 	}, nil
 }
 
+// if allowance.Cmp(deposit) < 0 {
+// 	amount := deposit
+// 	if b.mgr.InfiniteApprove() {
+// 		amount = abi.MaxUint256
+// 	}
+
+// 	err = b.setAllowance(ctx, client, p, amount)
+// 	if err != nil {
+// 		return err
+// 	}
+// }
+
 type bot struct {
 	mgr    pool.Manager
 	logger log.Logger
-
-	poolWg sync.WaitGroup
 }
 
 func (b *bot) Run(ctx context.Context) error {
-	for _, p := range b.mgr.Pools() {
-		b.poolWg.Add(1)
-		go b.processPool(ctx, p)
-	}
-
-	b.poolWg.Wait()
-
-	return nil
-}
-
-func (b *bot) processPool(ctx context.Context, p pool.Pool) {
-	level.Info(b.logger).Log("msg", "starting processing pool", "network", p.NetworkName())
-	defer b.poolWg.Done()
-
-	dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
-	defer cancel()
-
-	client, err := p.Dial(dialCtx)
-	if err != nil {
-		level.Error(b.logger).Log("msg", "unable to create EVM client for pool", "err", err, "network", p.NetworkName())
-		return
-	}
-
 	jobs := make(chan bool, 4)
 	jobs <- true
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-jobs:
-			jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
-			defer cancel()
-
-			err = b.processPoolJob(jobCtx, client, p)
-			if err != nil {
-				level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to process pool job", "err", err)
-			}
+			b.processJob(ctx)
 		}
 	}
 }
 
-func (b *bot) processPoolJob(ctx context.Context, client *ethclient.Client, p pool.Pool) error {
-	balance, allowance, err := b.getBalanceAndAllowance(ctx, client, p)
-	if err != nil {
-		return err
+func (b *bot) processJob(ctx context.Context) {
+	jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
+	defer cancel()
+
+	jobWg := sync.WaitGroup{}
+	profitWg := sync.WaitGroup{}
+	profitChan := make(chan *arbitrationProfit)
+	mostProfitChan := make(chan *arbitrationProfit)
+	for _, p := range b.mgr.Pools() {
+		jobWg.Add(1)
+		go b.processPool(jobCtx, p, profitChan, &jobWg)
 	}
 
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "fetched token balance", "balance", balance, "allowance", allowance)
+	profitWg.Add(1)
+	go b.processProfits(ctx, profitChan, mostProfitChan, &profitWg)
+
+	jobWg.Wait()
+	close(profitChan)
+
+	profit, ok := <-mostProfitChan
+	if !ok {
+		return
+	}
+
+	level.Debug(b.logger).Log("msg", "most profitable path", "netprof", profit.netTokenProfix)
+}
+
+func (b *bot) processProfits(ctx context.Context, profitChan <-chan *arbitrationProfit, mostProfitChan chan<- *arbitrationProfit, profitWg *sync.WaitGroup) {
+	defer profitWg.Done()
+	defer close(mostProfitChan)
+	for profit := range profitChan {
+		level.Debug(b.logger).Log("msg", "processing profit", "netprof", profit.netTokenProfix)
+	}
+}
+
+func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *arbitrationProfit, jobWg *sync.WaitGroup) {
+	defer jobWg.Done()
+
+	reward, err := b.estimatePotentialReward(ctx, p)
+	if err != nil {
+		level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to estimate potential reward", "err", err)
+		return
+	}
+
+	for _, poolTo := range b.mgr.Pools() {
+		fee, err := b.estimatePotentialFee(ctx, p, reward)
+		if err != nil {
+			level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to estimate potential fee", "err", err)
+			return
+		}
+
+		route := &arbitrationRoute{
+			from:   p,
+			to:     poolTo,
+			reward: reward,
+			fee:    fee,
+		}
+
+		profit, err := b.calculateArbitrationProfit(ctx, route)
+		if err != nil {
+			level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to calculate arbitration profit", "err", err)
+			return
+		}
+
+		profitChan <- profit
+	}
+}
+
+func (b *bot) estimatePotentialReward(ctx context.Context, p pool.Pool) (*potentialReward, error) {
+	dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
+	defer cancel()
+
+	client, err := p.Dial(dialCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	balance, allowance, err := b.getBalanceAndAllowance(ctx, client, p)
+	if err != nil {
+		return nil, err
+	}
 
 	deposit, reward, err := b.estimateDepositAndReward(ctx, client, p, balance)
 	if err != nil {
-		return err
-	}
-
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", "calculated potential rewards", "deposit", deposit, "reward", reward)
-	if reward.Cmp(big.NewInt(0)) <= 0 {
-		return nil
-	}
-
-	if allowance.Cmp(deposit) < 0 {
-		amount := deposit
-		if b.mgr.InfiniteApprove() {
-			amount = abi.MaxUint256
-		}
-
-		err = b.setAllowance(ctx, client, p, amount)
-		if err != nil {
-			return err
-		}
+		return nil, err
 	}
 
 	gasLimit, err := b.estimateDepositGas(ctx, client, p, deposit)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	level.Debug(b.logger).Log("pool", b.poolID(p), "msg", fmt.Sprintf("gas limit: %d", gasLimit))
+	return &potentialReward{
+		balance:   balance,
+		allowance: allowance,
+		deposit:   deposit,
+		reward:    reward,
+		gasLimit:  gasLimit,
+	}, nil
+}
 
-	return nil
+func (b *bot) estimatePotentialFee(ctx context.Context, p pool.Pool, reward *potentialReward) (*potentialFee, error) {
+	return &potentialFee{
+		tokenFee: new(big.Int),
+	}, nil
+}
+
+func (b *bot) calculateArbitrationProfit(ctx context.Context, route *arbitrationRoute) (*arbitrationProfit, error) {
+	return &arbitrationProfit{
+		route:          route,
+		netTokenProfix: new(big.Int),
+	}, nil
 }
 
 func (b *bot) setAllowance(ctx context.Context, client *ethclient.Client, p pool.Pool, amount *big.Int) error {
