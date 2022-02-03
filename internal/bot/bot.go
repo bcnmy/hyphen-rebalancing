@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -18,11 +17,7 @@ import (
 )
 
 const (
-	connectionTimeout = time.Second * 30
-	jobTimeout        = time.Second * 60
-)
-
-const (
+	jobTimeout  = time.Second * 60
 	baseDivisor = 10000000000
 )
 
@@ -146,7 +141,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 
 	reward, err := b.estimatePotentialReward(ctx, p)
 	if err != nil {
-		level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to estimate potential reward", "err", err)
+		level.Error(b.logger).Log("pool", p, "msg", "unable to estimate potential reward", "err", err)
 		return
 	}
 
@@ -157,7 +152,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 
 		fee, err := b.estimatePotentialFee(ctx, poolTo, reward)
 		if err != nil {
-			level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to estimate potential fee", "err", err)
+			level.Error(b.logger).Log("pool", p, "msg", "unable to estimate potential fee", "err", err)
 			return
 		}
 
@@ -170,7 +165,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 
 		profit, err := b.calculateArbitrationProfit(ctx, route)
 		if err != nil {
-			level.Error(b.logger).Log("pool", b.poolID(p), "msg", "unable to calculate arbitration profit", "err", err)
+			level.Error(b.logger).Log("pool", p, "msg", "unable to calculate arbitration profit", "err", err)
 			return
 		}
 
@@ -359,8 +354,4 @@ func (b *bot) executeDeposit(ctx context.Context, from pool.Pool, to pool.Pool, 
 	}
 
 	return nil
-}
-
-func (b *bot) poolID(p pool.Pool) string {
-	return fmt.Sprintf("%s:%s:%s:%s:%s", b.mgr.PoolName(), b.mgr.AccountName(), b.mgr.TokenName(), p.NetworkName(), p.ChainID().String())
 }

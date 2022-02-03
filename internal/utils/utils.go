@@ -9,7 +9,9 @@ import (
 )
 
 func NewCallOpts(ctx context.Context) *bind.CallOpts {
-	return &bind.CallOpts{Context: ctx}
+	return &bind.CallOpts{
+		Context: ctx,
+	}
 }
 
 func NewTransactor(ctx context.Context, key *ecdsa.PrivateKey, chainId *big.Int) (*bind.TransactOpts, error) {

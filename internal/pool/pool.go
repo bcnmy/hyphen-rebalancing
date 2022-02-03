@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -18,6 +19,7 @@ type Pool interface {
 	Address() common.Address
 
 	NetworkName() string
+	String() string
 }
 
 type pool struct {
@@ -46,4 +48,8 @@ func (p *pool) Address() common.Address {
 
 func (p *pool) NetworkName() string {
 	return p.networkName
+}
+
+func (p *pool) String() string {
+	return fmt.Sprintf("%s:%s", p.address.String(), p.networkName)
 }
