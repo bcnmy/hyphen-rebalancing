@@ -18,8 +18,14 @@ import (
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
 )
 
-const connectionTimeout = time.Second * 30
-const jobTimeout = time.Second * 60
+const (
+	connectionTimeout = time.Second * 30
+	jobTimeout        = time.Second * 60
+)
+
+const (
+	baseDivisor = 10000000000
+)
 
 type Bot interface {
 	Run(ctx context.Context) error
@@ -75,15 +81,23 @@ func (b *bot) processJob(ctx context.Context) {
 		return
 	}
 
-	level.Debug(b.logger).Log("msg", "most profitable path", "netprof", profit.netTokenProfix)
+	route := fmt.Sprintf("%s -> %s", profit.route.from.NetworkName(), profit.route.to.NetworkName())
+	level.Debug(b.logger).Log("msg", "most profitable path", "route", route, "netprof", profit.netTokenProfit)
 }
 
 func (b *bot) processProfits(ctx context.Context, profitChan <-chan *arbitrationProfit, mostProfitChan chan<- *arbitrationProfit, profitWg *sync.WaitGroup) {
 	defer profitWg.Done()
 	defer close(mostProfitChan)
+
+	var mostProfitable *arbitrationProfit
 	for profit := range profitChan {
-		routeName := fmt.Sprintf("%s -> %s", profit.route.from.NetworkName(), profit.route.to.NetworkName())
-		level.Debug(b.logger).Log("msg", "processing profit estimate", "route", routeName, "netprof", profit.netTokenProfix)
+		if mostProfitable == nil || profit.netTokenProfit.Cmp(mostProfitable.netTokenProfit) > 0 {
+			mostProfitable = profit
+		}
+	}
+
+	if mostProfitable != nil {
+		mostProfitChan <- mostProfitable
 	}
 }
 
@@ -172,8 +186,7 @@ func (b *bot) estimatePotentialFee(ctx context.Context, p pool.Pool, reward *pot
 		return nil, err
 	}
 
-	baseDivisor := big.NewInt(10000000000)
-	transferFee := new(big.Int).Div(new(big.Int).Mul(amount, transferFeePerc), baseDivisor)
+	transferFee := new(big.Int).Div(new(big.Int).Mul(amount, transferFeePerc), big.NewInt(baseDivisor))
 
 	return &potentialFee{
 		tokenFee: transferFee,
@@ -185,7 +198,7 @@ func (b *bot) calculateArbitrationProfit(ctx context.Context, route *arbitration
 
 	return &arbitrationProfit{
 		route:          route,
-		netTokenProfix: netTokenProfit,
+		netTokenProfit: netTokenProfit,
 	}, nil
 }
 

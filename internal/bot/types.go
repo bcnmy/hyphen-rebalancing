@@ -8,7 +8,7 @@ import (
 
 type arbitrationProfit struct {
 	route          *arbitrationRoute
-	netTokenProfix *big.Int
+	netTokenProfit *big.Int
 }
 
 type arbitrationRoute struct {
