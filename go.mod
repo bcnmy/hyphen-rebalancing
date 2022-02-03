@@ -1,4 +1,4 @@
-module github.com/bcnmy/hyphen-arbitrage
+module github.com/bcnmy/hyphen-rebalancing
 
 go 1.17
 

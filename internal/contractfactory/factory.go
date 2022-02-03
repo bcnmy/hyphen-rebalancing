@@ -2,14 +2,15 @@ package contractfactory
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/generated/erc20"
-	"github.com/bcnmy/hyphen-arbitrage/internal/generated/hyphen"
-	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
-	"github.com/bcnmy/hyphen-arbitrage/internal/utils"
+	"github.com/bcnmy/hyphen-rebalancing/internal/generated/erc20"
+	"github.com/bcnmy/hyphen-rebalancing/internal/generated/hyphen"
+	"github.com/bcnmy/hyphen-rebalancing/internal/pool"
+	"github.com/bcnmy/hyphen-rebalancing/internal/utils"
 )
 
 const (
@@ -17,6 +18,8 @@ const (
 	callTimeout = time.Second * 30
 )
 
+// Factory allows to create contract instances from pool interface.
+// Contract instances are cached per chain id.
 type Factory interface {
 	LiquidityPool(p pool.Pool) (*hyphen.LiquidityPool, error)
 	LiquidityProviders(p pool.Pool) (*hyphen.LiquidityProviders, error)
@@ -37,15 +40,26 @@ func New() (Factory, error) {
 }
 
 type factory struct {
-	liquidityPoolMap      map[uint64]*hyphen.LiquidityPool
-	liquidityProvidersMap map[uint64]*hyphen.LiquidityProviders
-	tokenManagerMap       map[uint64]*hyphen.TokenManager
-	erc20Map              map[uint64]*erc20.Erc20
+	liquidityPoolMap   map[uint64]*hyphen.LiquidityPool
+	liquidityPoolMutex sync.Mutex
 
-	clientMap map[uint64]*ethclient.Client
+	liquidityProvidersMap   map[uint64]*hyphen.LiquidityProviders
+	liquidityProvidersMutex sync.Mutex
+
+	tokenManagerMap   map[uint64]*hyphen.TokenManager
+	tokenManagerMutex sync.Mutex
+
+	erc20Map   map[uint64]*erc20.Erc20
+	erc20Mutex sync.Mutex
+
+	clientMap   map[uint64]*ethclient.Client
+	clientMutex sync.Mutex
 }
 
 func (f *factory) LiquidityPool(p pool.Pool) (*hyphen.LiquidityPool, error) {
+	f.liquidityPoolMutex.Lock()
+	defer f.liquidityPoolMutex.Unlock()
+
 	liquidityPool, ok := f.liquidityPoolMap[f.getChainID(p)]
 	if ok {
 		return liquidityPool, nil
@@ -67,6 +81,9 @@ func (f *factory) LiquidityPool(p pool.Pool) (*hyphen.LiquidityPool, error) {
 }
 
 func (f *factory) LiquidityProviders(p pool.Pool) (*hyphen.LiquidityProviders, error) {
+	f.liquidityProvidersMutex.Lock()
+	defer f.liquidityProvidersMutex.Unlock()
+
 	liquidityProviders, ok := f.liquidityProvidersMap[f.getChainID(p)]
 	if ok {
 		return liquidityProviders, nil
@@ -100,6 +117,9 @@ func (f *factory) LiquidityProviders(p pool.Pool) (*hyphen.LiquidityProviders, e
 }
 
 func (f *factory) TokenManager(p pool.Pool) (*hyphen.TokenManager, error) {
+	f.tokenManagerMutex.Lock()
+	defer f.tokenManagerMutex.Unlock()
+
 	tokenManager, ok := f.tokenManagerMap[f.getChainID(p)]
 	if ok {
 		return tokenManager, nil
@@ -133,6 +153,9 @@ func (f *factory) TokenManager(p pool.Pool) (*hyphen.TokenManager, error) {
 }
 
 func (f *factory) ERC20(p pool.Pool) (*erc20.Erc20, error) {
+	f.erc20Mutex.Lock()
+	defer f.erc20Mutex.Unlock()
+
 	token, ok := f.erc20Map[f.getChainID(p)]
 	if ok {
 		return token, nil
@@ -154,6 +177,9 @@ func (f *factory) ERC20(p pool.Pool) (*erc20.Erc20, error) {
 }
 
 func (f *factory) Client(p pool.Pool) (*ethclient.Client, error) {
+	f.clientMutex.Lock()
+	defer f.clientMutex.Unlock()
+
 	client, ok := f.clientMap[f.getChainID(p)]
 	if ok {
 		return client, nil

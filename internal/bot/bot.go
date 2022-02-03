@@ -11,37 +11,40 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/contractfactory"
-	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
-	"github.com/bcnmy/hyphen-arbitrage/internal/utils"
+	"github.com/bcnmy/hyphen-rebalancing/internal/config"
+	"github.com/bcnmy/hyphen-rebalancing/internal/contractfactory"
+	"github.com/bcnmy/hyphen-rebalancing/internal/pool"
+	"github.com/bcnmy/hyphen-rebalancing/internal/utils"
 )
 
 const (
-	jobTimeout  = time.Second * 60
 	baseDivisor = 10000000000
 )
 
+// Bot allows to run rebalancing jobs for interconnected pools.
 type Bot interface {
 	Run(ctx context.Context) error
 }
 
-func New(mgr pool.Manager, logger log.Logger) (Bot, error) {
+func New(conf config.General, mgr pool.Manager, logger log.Logger) (Bot, error) {
 	cf, err := contractfactory.New()
 	if err != nil {
 		return nil, err
 	}
 
 	return &bot{
-		mgr: mgr,
-		cf:  cf,
+		conf: conf,
+		mgr:  mgr,
+		cf:   cf,
 
-		logger: logger,
+		logger: log.With(logger, "account", mgr.AccountName(), "token", mgr.TokenName(), "pool", mgr.PoolName()),
 	}, nil
 }
 
 type bot struct {
-	mgr pool.Manager
-	cf  contractfactory.Factory
+	conf config.General
+	mgr  pool.Manager
+	cf   contractfactory.Factory
 
 	logger log.Logger
 }
@@ -51,18 +54,28 @@ func (b *bot) Run(ctx context.Context) error {
 	jobs <- true
 
 	for {
+		interval := make(<-chan time.Time)
+		if b.conf.UpdateInterval > 0 {
+			interval = time.After(time.Second * time.Duration(b.conf.UpdateInterval))
+		}
+
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-jobs:
+			b.processJob(ctx)
+		case <-interval:
 			b.processJob(ctx)
 		}
 	}
 }
 
 func (b *bot) processJob(ctx context.Context) {
+	jobTimeout := time.Second * time.Duration(b.conf.JobTimeout)
 	jobCtx, cancel := context.WithTimeout(ctx, jobTimeout)
 	defer cancel()
+
+	level.Info(b.logger).Log("msg", "processing new rebalancing job", "timeout", b.conf.JobTimeout)
 
 	jobWg := sync.WaitGroup{}
 	profitWg := sync.WaitGroup{}
@@ -141,7 +154,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 
 	reward, err := b.estimatePotentialReward(ctx, p)
 	if err != nil {
-		level.Error(b.logger).Log("pool", p, "msg", "unable to estimate potential reward", "err", err)
+		level.Error(b.logger).Log("msg", "unable to estimate potential reward", "err", err)
 		return
 	}
 
@@ -152,7 +165,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 
 		fee, err := b.estimatePotentialFee(ctx, poolTo, reward)
 		if err != nil {
-			level.Error(b.logger).Log("pool", p, "msg", "unable to estimate potential fee", "err", err)
+			level.Error(b.logger).Log("msg", "unable to estimate potential fee", "err", err)
 			return
 		}
 
@@ -165,7 +178,7 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 
 		profit, err := b.calculateArbitrationProfit(ctx, route)
 		if err != nil {
-			level.Error(b.logger).Log("pool", p, "msg", "unable to calculate arbitration profit", "err", err)
+			level.Error(b.logger).Log("msg", "unable to calculate arbitration profit", "err", err)
 			return
 		}
 
@@ -341,7 +354,7 @@ func (b *bot) executeDeposit(ctx context.Context, from pool.Pool, to pool.Pool, 
 		return err
 	}
 
-	level.Info(b.logger).Log("msg", "executing arbitrage transaction", "tx", depositTx.Hash())
+	level.Info(b.logger).Log("msg", "executing rebalancing transaction", "tx", depositTx.Hash())
 
 	client, err := b.cf.Client(from)
 	if err != nil {

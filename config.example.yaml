@@ -1,3 +1,13 @@
+# General bot settings
+general:
+  # Optional. Time interval in seconds to check for liquidity pool states.
+  # Could be used as fallback if events are not available (HTTP RPC endpoint is being used).
+  # Disabled by default.
+  updateInterval: 30
+  # Optional. Override default rabalancing job timeout.
+  # If RPC endpoint is not responding, job will be canceled.
+  jobTimeout: 60
+
 # List of networks to use for rebalancing
 networks:
   ethereum:
@@ -27,12 +37,14 @@ tokens:
 
 # List of accounts to use for rebalancing
 accounts:
-  default:
+  acc1:
     privateKey: 0000000000000000000000000000000000000000000000000000000000000001
+  acc2:
+    privateKey: 0000000000000000000000000000000000000000000000000000000000000002
 
 # List of interconnected liquidity pools used for rebalancing
 pools:
-  default:
+  main:
     # Liquidity pool addresses for each network that bot wants to operate in
     addresses:
       ethereum: 0x0000000000000000000000000000000000000001
@@ -41,4 +53,4 @@ pools:
     # Tokens to support in this liquidity pool
     tokens: [usdt]
     # Accounts to use for rebalancing in this liquidity pool
-    accounts: [default]
+    accounts: [acc1, acc2]

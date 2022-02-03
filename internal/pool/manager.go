@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-kit/log"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/config"
+	"github.com/bcnmy/hyphen-rebalancing/internal/config"
 )
 
 // Manager contains several interconnected liquidity pools on different chains

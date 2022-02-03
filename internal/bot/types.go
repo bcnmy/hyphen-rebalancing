@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
+	"github.com/bcnmy/hyphen-rebalancing/internal/pool"
 )
 
 type arbitrationProfit struct {

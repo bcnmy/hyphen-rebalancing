@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/config"
+	"github.com/bcnmy/hyphen-rebalancing/internal/config"
 )
 
 // Pool represents single liquidity pool on chain

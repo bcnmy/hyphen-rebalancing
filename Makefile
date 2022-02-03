@@ -1,4 +1,4 @@
-IMAGE=arbitrage
+IMAGE=rebalancing
 
 .PHONY: help
 help: # Display this help
@@ -10,4 +10,4 @@ build: # Build docker image
 
 .PHONY: run
 run: build # Run bot
-	docker run -v "$$(pwd)/config.yaml":/arbitrage/config.yaml $(IMAGE)
+	docker run -v "$$(pwd)/config.yaml":/rebalancing/config.yaml $(IMAGE)
