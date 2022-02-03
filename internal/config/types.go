@@ -20,14 +20,14 @@ type Config struct {
 }
 
 type Network struct {
-	ChainID         *big.Int `yaml:"chainID"`
-	RPCURL          string   `yaml:"rpcURL"`
-	DefaultGasPrice *big.Int `yaml:"defaultGasPrice"`
-	MaxGasPrice     *big.Int `yaml:"maxGasPrice"`
+	ChainID *big.Int `yaml:"chainID"`
+	RPCURL  string   `yaml:"rpcURL"`
 }
 
 type Token struct {
-	Addresses map[string]Address `yaml:"addresses"`
+	Addresses       map[string]Address `yaml:"addresses"`
+	MinimalProfit   *big.Int           `yaml:"minimalProfit"`
+	InfiniteApprove bool               `yaml:"infiniteApprove"`
 }
 
 type Account struct {
@@ -35,12 +35,9 @@ type Account struct {
 }
 
 type Pool struct {
-	Tokens                 []string           `yaml:"tokens"`
-	Accounts               []string           `yaml:"accounts"`
-	Addresses              map[string]Address `yaml:"addresses"`
-	ProfitabilityThreshold float64            `yaml:"profitabilityThreshold"`
-	InfiniteApprove        bool               `yaml:"infiniteApprove"`
-	CancelOnFail           bool               `yaml:"cancelOnFail"`
+	Tokens    []string           `yaml:"tokens"`
+	Accounts  []string           `yaml:"accounts"`
+	Addresses map[string]Address `yaml:"addresses"`
 }
 
 type Address struct {

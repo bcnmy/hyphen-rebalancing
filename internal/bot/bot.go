@@ -9,13 +9,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 
-	"github.com/bcnmy/hyphen-arbitrage/internal/generated/erc20"
-	"github.com/bcnmy/hyphen-arbitrage/internal/generated/hyphen"
+	"github.com/bcnmy/hyphen-arbitrage/internal/contractfactory"
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
+	"github.com/bcnmy/hyphen-arbitrage/internal/utils"
 )
 
 const (
@@ -32,14 +31,23 @@ type Bot interface {
 }
 
 func New(mgr pool.Manager, logger log.Logger) (Bot, error) {
+	cf, err := contractfactory.New()
+	if err != nil {
+		return nil, err
+	}
+
 	return &bot{
-		mgr:    mgr,
+		mgr: mgr,
+		cf:  cf,
+
 		logger: logger,
 	}, nil
 }
 
 type bot struct {
-	mgr    pool.Manager
+	mgr pool.Manager
+	cf  contractfactory.Factory
+
 	logger log.Logger
 }
 
@@ -81,8 +89,40 @@ func (b *bot) processJob(ctx context.Context) {
 		return
 	}
 
-	route := fmt.Sprintf("%s -> %s", profit.route.from.NetworkName(), profit.route.to.NetworkName())
-	level.Debug(b.logger).Log("msg", "most profitable path", "route", route, "netprof", profit.netTokenProfit)
+	err := b.executeProfitablePath(ctx, profit)
+	if err != nil {
+		level.Error(b.logger).Log("msg", "unable to execute most profitable path", "route", profit.route, "err", err)
+		return
+	}
+}
+
+func (b *bot) executeProfitablePath(ctx context.Context, profit *arbitrationProfit) error {
+	reward := profit.route.reward
+
+	level.Info(b.logger).Log(
+		"msg", "found most profitable path",
+		"route", profit.route,
+		"netprof", profit.netTokenProfit,
+		"deposit", reward.deposit,
+		"reward", reward.reward,
+	)
+
+	if b.mgr.MinimalProfit().Cmp(profit.netTokenProfit) > 0 {
+		level.Info(b.logger).Log("msg", "net profit is not enough", "route", profit.route, "netprof", profit.netTokenProfit, "minprof", b.mgr.MinimalProfit())
+		return nil
+	}
+
+	err := b.updateAllowance(ctx, profit.route.from, reward.allowance, reward.deposit)
+	if err != nil {
+		return err
+	}
+
+	err = b.executeDeposit(ctx, profit.route.from, profit.route.to, reward.deposit)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (b *bot) processProfits(ctx context.Context, profitChan <-chan *arbitrationProfit, mostProfitChan chan<- *arbitrationProfit, profitWg *sync.WaitGroup) {
@@ -139,20 +179,12 @@ func (b *bot) processPool(ctx context.Context, p pool.Pool, profitChan chan<- *a
 }
 
 func (b *bot) estimatePotentialReward(ctx context.Context, p pool.Pool) (*potentialReward, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
-	defer cancel()
-
-	client, err := p.Dial(dialCtx)
+	balance, allowance, err := b.getBalanceAndAllowance(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 
-	balance, allowance, err := b.getBalanceAndAllowance(ctx, client, p)
-	if err != nil {
-		return nil, err
-	}
-
-	deposit, reward, err := b.estimateDepositAndReward(ctx, client, p, balance)
+	deposit, reward, err := b.estimateDepositAndReward(ctx, p, balance)
 	if err != nil {
 		return nil, err
 	}
@@ -166,20 +198,12 @@ func (b *bot) estimatePotentialReward(ctx context.Context, p pool.Pool) (*potent
 }
 
 func (b *bot) estimatePotentialFee(ctx context.Context, p pool.Pool, reward *potentialReward) (*potentialFee, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
-	defer cancel()
-
-	client, err := p.Dial(dialCtx)
+	liquidityPool, err := b.cf.LiquidityPool(p)
 	if err != nil {
 		return nil, err
 	}
 
-	liquidityPool, err := hyphen.NewLiquidityPool(p.Address(), client)
-	if err != nil {
-		return nil, err
-	}
-
-	callOpts := newCallOpts(ctx)
+	callOpts := utils.NewCallOpts(ctx)
 	amount := new(big.Int).Add(reward.deposit, reward.reward)
 	transferFeePerc, err := liquidityPool.GetTransferFee(callOpts, p.Token(), amount)
 	if err != nil {
@@ -202,19 +226,14 @@ func (b *bot) calculateArbitrationProfit(ctx context.Context, route *arbitration
 	}, nil
 }
 
-func (b *bot) estimateDepositAndReward(ctx context.Context, client *ethclient.Client, p pool.Pool, maxDeposit *big.Int) (*big.Int, *big.Int, error) {
-	liquidityPool, err := hyphen.NewLiquidityPool(p.Address(), client)
+func (b *bot) estimateDepositAndReward(ctx context.Context, p pool.Pool, maxDeposit *big.Int) (*big.Int, *big.Int, error) {
+	liquidityPool, err := b.cf.LiquidityPool(p)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	callOpts := newCallOpts(ctx)
-	liquidityProvidersAddress, err := liquidityPool.LiquidityProviders(callOpts)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	liquidityProviders, err := hyphen.NewLiquidityProviders(liquidityProvidersAddress, client)
+	callOpts := utils.NewCallOpts(ctx)
+	liquidityProviders, err := b.cf.LiquidityProviders(p)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -229,12 +248,7 @@ func (b *bot) estimateDepositAndReward(ctx context.Context, client *ethclient.Cl
 		return nil, nil, err
 	}
 
-	tokenManagerAddress, err := liquidityPool.TokenManager(callOpts)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	tokenManager, err := hyphen.NewTokenManager(tokenManagerAddress, client)
+	tokenManager, err := b.cf.TokenManager(p)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -245,8 +259,8 @@ func (b *bot) estimateDepositAndReward(ctx context.Context, client *ethclient.Cl
 	}
 
 	liquidityDeficit := big.NewInt(0).Sub(suppliedLiquidity, currentLiquidity)
-	deposit := min(maxDeposit, liquidityDeficit, tokenInfo.MaxCap)
-	deposit = max(deposit, tokenInfo.MinCap)
+	deposit := utils.Min(maxDeposit, liquidityDeficit, tokenInfo.MaxCap)
+	deposit = utils.Max(deposit, tokenInfo.MinCap)
 
 	reward, err := liquidityPool.GetRewardAmount(callOpts, deposit, p.Token())
 	if err != nil {
@@ -256,20 +270,19 @@ func (b *bot) estimateDepositAndReward(ctx context.Context, client *ethclient.Cl
 	return deposit, reward, nil
 }
 
-func (b *bot) getBalanceAndAllowance(ctx context.Context, client *ethclient.Client, p pool.Pool) (*big.Int, *big.Int, error) {
-	erc20Contract, err := erc20.NewErc20(p.Token(), client)
+func (b *bot) getBalanceAndAllowance(ctx context.Context, p pool.Pool) (*big.Int, *big.Int, error) {
+	erc20Contract, err := b.cf.ERC20(p)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	callOpts := newCallOpts(ctx)
+	callOpts := utils.NewCallOpts(ctx)
 	balance, err := erc20Contract.BalanceOf(callOpts, b.mgr.AccountAddress())
 	if err != nil {
 		return nil, nil, err
 	}
 
 	allowance, err := erc20Contract.Allowance(callOpts, b.mgr.AccountAddress(), p.Address())
-
 	if err != nil {
 		return nil, nil, err
 	}
@@ -277,7 +290,7 @@ func (b *bot) getBalanceAndAllowance(ctx context.Context, client *ethclient.Clie
 	return balance, allowance, nil
 }
 
-func (b *bot) updateAllowance(ctx context.Context, client *ethclient.Client, p pool.Pool, currentAllowance *big.Int, requiredAllowance *big.Int) error {
+func (b *bot) updateAllowance(ctx context.Context, p pool.Pool, currentAllowance *big.Int, requiredAllowance *big.Int) error {
 	if currentAllowance.Cmp(requiredAllowance) > 0 {
 		return nil
 	}
@@ -287,22 +300,60 @@ func (b *bot) updateAllowance(ctx context.Context, client *ethclient.Client, p p
 		toApprove = abi.MaxUint256
 	}
 
-	erc20Contract, err := erc20.NewErc20(p.Token(), client)
+	erc20Contract, err := b.cf.ERC20(p)
 	if err != nil {
 		return err
 	}
 
-	opts, err := newTransactor(ctx, b.mgr.PrivateKey(), p.ChainID())
+	opts, err := utils.NewTransactor(ctx, b.mgr.PrivateKey(), p.ChainID())
 	if err != nil {
 		return err
 	}
 
-	tx, err := erc20Contract.Approve(opts, p.Address(), toApprove)
+	approveTx, err := erc20Contract.Approve(opts, p.Address(), toApprove)
 	if err != nil {
 		return err
 	}
 
-	_, err = bind.WaitMined(ctx, client, tx)
+	level.Info(b.logger).Log("msg", "updating allowance", "tx", approveTx.Hash())
+
+	client, err := b.cf.Client(p)
+	if err != nil {
+		return err
+	}
+
+	_, err = bind.WaitMined(ctx, client, approveTx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (b *bot) executeDeposit(ctx context.Context, from pool.Pool, to pool.Pool, amount *big.Int) error {
+	liquidityPool, err := b.cf.LiquidityPool(from)
+	if err != nil {
+		return err
+	}
+
+	txOpts, err := utils.NewTransactor(ctx, b.mgr.PrivateKey(), from.ChainID())
+	if err != nil {
+		return err
+	}
+
+	depositTx, err := liquidityPool.DepositErc20(txOpts, to.ChainID(), from.Token(), b.mgr.AccountAddress(), amount, "")
+	if err != nil {
+		return err
+	}
+
+	level.Info(b.logger).Log("msg", "executing arbitrage transaction", "tx", depositTx.Hash())
+
+	client, err := b.cf.Client(from)
+	if err != nil {
+		return err
+	}
+
+	_, err = bind.WaitMined(ctx, client, depositTx)
 	if err != nil {
 		return err
 	}

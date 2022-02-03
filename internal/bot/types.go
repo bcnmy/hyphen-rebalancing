@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/bcnmy/hyphen-arbitrage/internal/pool"
@@ -16,6 +17,10 @@ type arbitrationRoute struct {
 	to     pool.Pool
 	reward *potentialReward
 	fee    *potentialFee
+}
+
+func (r *arbitrationRoute) String() string {
+	return fmt.Sprintf("%s:%s", r.from.NetworkName(), r.to.NetworkName())
 }
 
 type potentialReward struct {

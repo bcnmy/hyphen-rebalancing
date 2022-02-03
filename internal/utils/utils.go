@@ -1,4 +1,4 @@
-package bot
+package utils
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 )
 
-func newCallOpts(ctx context.Context) *bind.CallOpts {
+func NewCallOpts(ctx context.Context) *bind.CallOpts {
 	return &bind.CallOpts{Context: ctx}
 }
 
-func newTransactor(ctx context.Context, key *ecdsa.PrivateKey, chainId *big.Int) (*bind.TransactOpts, error) {
+func NewTransactor(ctx context.Context, key *ecdsa.PrivateKey, chainId *big.Int) (*bind.TransactOpts, error) {
 	opts, err := bind.NewKeyedTransactorWithChainID(key, chainId)
 	if err != nil {
 		return nil, err
@@ -23,7 +23,7 @@ func newTransactor(ctx context.Context, key *ecdsa.PrivateKey, chainId *big.Int)
 	return opts, nil
 }
 
-func min(num *big.Int, v ...*big.Int) *big.Int {
+func Min(num *big.Int, v ...*big.Int) *big.Int {
 	min := num
 	for _, num := range v {
 		if num.Cmp(min) < 0 {
@@ -34,7 +34,7 @@ func min(num *big.Int, v ...*big.Int) *big.Int {
 	return min
 }
 
-func max(num *big.Int, v ...*big.Int) *big.Int {
+func Max(num *big.Int, v ...*big.Int) *big.Int {
 	max := num
 	for _, num := range v {
 		if num.Cmp(max) > 0 {

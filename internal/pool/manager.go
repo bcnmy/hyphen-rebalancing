@@ -3,6 +3,7 @@ package pool
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -17,6 +18,7 @@ type Manager interface {
 	PrivateKey() *ecdsa.PrivateKey
 	PublicKey() *ecdsa.PublicKey
 	AccountAddress() common.Address
+	MinimalProfit() *big.Int
 	InfiniteApprove() bool
 
 	PoolName() string
@@ -55,7 +57,8 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 				mgr := new(manager)
 				mgr.pools = []Pool{}
 				mgr.privateKey = accountConf.PrivateKey.Value
-				mgr.infiniteApprove = poolConf.InfiniteApprove
+				mgr.minimalProfit = tokenConf.MinimalProfit
+				mgr.infiniteApprove = tokenConf.InfiniteApprove
 
 				mgr.poolName = poolName
 				mgr.tokenName = tokenName
@@ -91,6 +94,7 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 type manager struct {
 	pools           []Pool
 	privateKey      *ecdsa.PrivateKey
+	minimalProfit   *big.Int
 	infiniteApprove bool
 
 	poolName    string
@@ -112,6 +116,10 @@ func (m *manager) PublicKey() *ecdsa.PublicKey {
 
 func (m *manager) AccountAddress() common.Address {
 	return crypto.PubkeyToAddress(m.privateKey.PublicKey)
+}
+
+func (m *manager) MinimalProfit() *big.Int {
+	return m.minimalProfit
 }
 
 func (m *manager) InfiniteApprove() bool {
