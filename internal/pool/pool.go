@@ -16,16 +16,14 @@ type Pool interface {
 	ChainID() *big.Int
 	Token() common.Address
 	Address() common.Address
-	Providers() common.Address
 
 	NetworkName() string
 }
 
 type pool struct {
-	network   config.Network
-	token     common.Address
-	address   common.Address
-	providers common.Address
+	network config.Network
+	token   common.Address
+	address common.Address
 
 	networkName string
 }
@@ -44,10 +42,6 @@ func (p *pool) Token() common.Address {
 
 func (p *pool) Address() common.Address {
 	return p.address
-}
-
-func (p *pool) Providers() common.Address {
-	return p.providers
 }
 
 func (p *pool) NetworkName() string {

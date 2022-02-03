@@ -23,7 +23,6 @@ type potentialReward struct {
 	allowance *big.Int
 	deposit   *big.Int
 	reward    *big.Int
-	gasLimit  uint64
 }
 
 type potentialFee struct {

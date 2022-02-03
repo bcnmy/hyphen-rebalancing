@@ -76,8 +76,7 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 						networkName: networkName,
 						network:     networkConf,
 						token:       tokenAddress.Value,
-						address:     poolAddresses.Pool.Value,
-						providers:   poolAddresses.Providers.Value,
+						address:     poolAddresses.Value,
 					})
 				}
 
