@@ -8,3 +8,7 @@ Bot allows to rebalance liquidity pools using bot's account token balance. Most 
 2. Copy `.env.example` to `.env`
 3. Set up variables inside `config.yaml` and `.env` files
 4. Run docker-compose up to run the bot
+
+## Environment Variables
+
+In order to not store sensitive data in yaml config, you could provide ENV variable name to lookup when specifying private keys, API keys, RPC URLs, etc.

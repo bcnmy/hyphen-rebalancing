@@ -20,7 +20,7 @@ type General struct {
 
 type Network struct {
 	ChainID *big.Int `yaml:"chainID"`
-	RPCURL  string   `yaml:"rpcURL"`
+	RPCURL  Secret   `yaml:"rpcURL"`
 }
 
 type Token struct {

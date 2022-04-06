@@ -31,7 +31,7 @@ type pool struct {
 }
 
 func (p *pool) Dial(ctx context.Context) (*ethclient.Client, error) {
-	return ethclient.DialContext(ctx, p.network.RPCURL)
+	return ethclient.DialContext(ctx, p.network.RPCURL.Value)
 }
 
 func (p *pool) ChainID() *big.Int {
