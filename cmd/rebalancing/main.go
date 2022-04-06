@@ -14,6 +14,7 @@ import (
 	"github.com/bcnmy/hyphen-rebalancing/internal/bot"
 	"github.com/bcnmy/hyphen-rebalancing/internal/config"
 	"github.com/bcnmy/hyphen-rebalancing/internal/pool"
+	"github.com/bcnmy/hyphen-rebalancing/internal/pricing"
 )
 
 func main() {
@@ -39,9 +40,14 @@ func main() {
 		panic(err)
 	}
 
+	pricingProvider, err := pricing.New(conf.Pricing, conf.Tokens, logger)
+	if err != nil {
+		level.Warn(logger).Log("msg", err.Error())
+	}
+
 	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
-	runBots(ctx, conf.General, poolManagers, &wg, logger)
+	runBots(ctx, conf.General, poolManagers, pricingProvider, &wg, logger)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -57,14 +63,14 @@ func main() {
 	wg.Wait()
 }
 
-func runBots(ctx context.Context, conf config.General, poolManagers []pool.Manager, wg *sync.WaitGroup, logger log.Logger) {
+func runBots(ctx context.Context, conf config.General, poolManagers []pool.Manager, pr pricing.Provider, wg *sync.WaitGroup, logger log.Logger) {
 	for _, mgr := range poolManagers {
 		wg.Add(1)
 
 		go func(mgr pool.Manager) {
 			defer wg.Done()
 
-			bot, err := bot.New(conf, mgr, logger)
+			bot, err := bot.New(conf, mgr, pr, logger)
 			if err != nil {
 				level.Error(logger).Log("msg", "unable to create bot", "err", err)
 				return

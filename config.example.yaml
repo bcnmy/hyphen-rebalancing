@@ -41,7 +41,7 @@ accounts:
   acc1:
     privateKey: 0000000000000000000000000000000000000000000000000000000000000001
   acc2:
-    privateKeyEnv: BOT_PRIVATE_KEY
+    privateKey: $BOT_PRIVATE_KEY
 
 # List of interconnected liquidity pools used for rebalancing
 pools:
@@ -55,3 +55,8 @@ pools:
     tokens: [usdt]
     # Accounts to use for rebalancing in this liquidity pool
     accounts: [acc1, acc2]
+
+# Pricing is provided based on token symbol from 'tokens' config
+pricing:
+  updateInterval: 60
+  coinMarketCapAPIKey: $COINMARKETCAP_API_KEY

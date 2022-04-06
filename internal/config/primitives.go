@@ -3,7 +3,9 @@ package config
 import (
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -17,7 +19,12 @@ type Address struct {
 }
 
 func (a *Address) UnmarshalYAML(value *yaml.Node) error {
-	address := common.HexToAddress(value.Value)
+	stringValue, err := prepareValue(value.Value)
+	if err != nil {
+		return err
+	}
+
+	address := common.HexToAddress(stringValue)
 	nullAddress := common.HexToAddress(nullAddressHex)
 	if address.Hex() == nullAddress.Hex() {
 		return errors.New("invalid address")
@@ -32,7 +39,12 @@ type PrivateKey struct {
 }
 
 func (p *PrivateKey) UnmarshalYAML(value *yaml.Node) error {
-	key, err := crypto.HexToECDSA(value.Value)
+	stringValue, err := prepareValue(value.Value)
+	if err != nil {
+		return err
+	}
+
+	key, err := crypto.HexToECDSA(stringValue)
 	if err != nil {
 		return err
 	}
@@ -41,21 +53,30 @@ func (p *PrivateKey) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-type PrivateKeyEnv struct {
-	Value *ecdsa.PrivateKey
+type Secret struct {
+	Value string
 }
 
-func (p *PrivateKeyEnv) UnmarshalYAML(value *yaml.Node) error {
-	privateKeyValue, ok := os.LookupEnv(value.Value)
+func (s *Secret) UnmarshalYAML(value *yaml.Node) error {
+	stringValue, err := prepareValue(value.Value)
+	if err != nil {
+		return err
+	}
+
+	s.Value = stringValue
+	return nil
+}
+
+func prepareValue(value string) (string, error) {
+	if !strings.HasPrefix(value, "$") {
+		return value, nil
+	}
+
+	envKey := strings.TrimLeft(value, "$")
+	envValue, ok := os.LookupEnv(envKey)
 	if !ok {
-		return errors.New("private key env variable is not set")
+		return "", fmt.Errorf("environment variable not found: %s", envKey)
 	}
 
-	key, err := crypto.HexToECDSA(privateKeyValue)
-	if err != nil {
-		return err
-	}
-
-	p.Value = key
-	return nil
+	return envValue, nil
 }

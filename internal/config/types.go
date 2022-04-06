@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/ecdsa"
-	"errors"
 	"math/big"
 )
 
@@ -12,6 +10,7 @@ type Config struct {
 	Tokens   map[string]Token   `yaml:"tokens"`
 	Accounts map[string]Account `yaml:"accounts"`
 	Pools    map[string]Pool    `yaml:"pools"`
+	Pricing  Pricing            `yaml:"pricing"`
 }
 
 type General struct {
@@ -31,24 +30,16 @@ type Token struct {
 }
 
 type Account struct {
-	PrivateKey    PrivateKey    `yaml:"privateKey"`
-	PrivateKeyEnv PrivateKeyEnv `yaml:"privateKeyEnv"`
-}
-
-func (a *Account) GetPrivateKey() (*ecdsa.PrivateKey, error) {
-	if a.PrivateKey.Value != nil {
-		return a.PrivateKey.Value, nil
-	}
-
-	if a.PrivateKeyEnv.Value != nil {
-		return a.PrivateKeyEnv.Value, nil
-	}
-
-	return nil, errors.New("private key is not set")
+	PrivateKey PrivateKey `yaml:"privateKey"`
 }
 
 type Pool struct {
 	Tokens    []string           `yaml:"tokens"`
 	Accounts  []string           `yaml:"accounts"`
 	Addresses map[string]Address `yaml:"addresses"`
+}
+
+type Pricing struct {
+	UpdateInterval      uint64 `yaml:"updateInterval"`
+	CoinMarketCapAPIKey Secret `yaml:"coinMarketCapAPIKey"`
 }

@@ -54,14 +54,9 @@ func FromConfig(conf *config.Config, logger log.Logger) ([]Manager, error) {
 					return nil, fmt.Errorf("pool config '%s' contains unknown account '%s'", poolName, accountName)
 				}
 
-				privateKey, err := accountConf.GetPrivateKey()
-				if err != nil {
-					return nil, fmt.Errorf("account '%s' error: %s", accountName, err.Error())
-				}
-
 				mgr := new(manager)
 				mgr.pools = []Pool{}
-				mgr.privateKey = privateKey
+				mgr.privateKey = accountConf.PrivateKey.Value
 				mgr.minimalProfit = tokenConf.MinimalProfit
 				mgr.infiniteApprove = tokenConf.InfiniteApprove
 

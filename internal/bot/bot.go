@@ -14,6 +14,7 @@ import (
 	"github.com/bcnmy/hyphen-rebalancing/internal/config"
 	"github.com/bcnmy/hyphen-rebalancing/internal/contractfactory"
 	"github.com/bcnmy/hyphen-rebalancing/internal/pool"
+	"github.com/bcnmy/hyphen-rebalancing/internal/pricing"
 	"github.com/bcnmy/hyphen-rebalancing/internal/utils"
 )
 
@@ -26,7 +27,7 @@ type Bot interface {
 	Run(ctx context.Context) error
 }
 
-func New(conf config.General, mgr pool.Manager, logger log.Logger) (Bot, error) {
+func New(conf config.General, mgr pool.Manager, pr pricing.Provider, logger log.Logger) (Bot, error) {
 	cf, err := contractfactory.New()
 	if err != nil {
 		return nil, err
@@ -36,6 +37,7 @@ func New(conf config.General, mgr pool.Manager, logger log.Logger) (Bot, error) 
 		conf: conf,
 		mgr:  mgr,
 		cf:   cf,
+		pr:   pr,
 
 		logger: log.With(logger, "account", mgr.AccountName(), "token", mgr.TokenName(), "pool", mgr.PoolName()),
 	}, nil
@@ -45,6 +47,7 @@ type bot struct {
 	conf config.General
 	mgr  pool.Manager
 	cf   contractfactory.Factory
+	pr   pricing.Provider
 
 	logger log.Logger
 }
@@ -52,6 +55,10 @@ type bot struct {
 func (b *bot) Run(ctx context.Context) error {
 	jobs := make(chan bool, 4)
 	jobs <- true
+
+	if b.pr != nil {
+		go b.pr.Run(ctx)
+	}
 
 	for {
 		interval := make(<-chan time.Time)
