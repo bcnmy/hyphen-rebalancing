@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"errors"
 	"math/big"
 )
 
@@ -29,7 +31,20 @@ type Token struct {
 }
 
 type Account struct {
-	PrivateKey PrivateKey `yaml:"privateKey"`
+	PrivateKey    PrivateKey    `yaml:"privateKey"`
+	PrivateKeyEnv PrivateKeyEnv `yaml:"privateKeyEnv"`
+}
+
+func (a *Account) GetPrivateKey() (*ecdsa.PrivateKey, error) {
+	if a.PrivateKey.Value != nil {
+		return a.PrivateKey.Value, nil
+	}
+
+	if a.PrivateKeyEnv.Value != nil {
+		return a.PrivateKeyEnv.Value, nil
+	}
+
+	return nil, errors.New("private key is not set")
 }
 
 type Pool struct {

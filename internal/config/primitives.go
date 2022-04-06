@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/ecdsa"
 	"errors"
+	"os"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -32,6 +33,25 @@ type PrivateKey struct {
 
 func (p *PrivateKey) UnmarshalYAML(value *yaml.Node) error {
 	key, err := crypto.HexToECDSA(value.Value)
+	if err != nil {
+		return err
+	}
+
+	p.Value = key
+	return nil
+}
+
+type PrivateKeyEnv struct {
+	Value *ecdsa.PrivateKey
+}
+
+func (p *PrivateKeyEnv) UnmarshalYAML(value *yaml.Node) error {
+	privateKeyValue, ok := os.LookupEnv(value.Value)
+	if !ok {
+		return errors.New("private key env variable is not set")
+	}
+
+	key, err := crypto.HexToECDSA(privateKeyValue)
 	if err != nil {
 		return err
 	}

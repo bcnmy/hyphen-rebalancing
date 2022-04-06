@@ -35,12 +35,13 @@ tokens:
     # Could help to speed up reward acquisition and reduce transaction costs.
     infiniteApprove: true
 
-# List of accounts to use for rebalancing
+# List of accounts to use for rebalancing.
+# You can choose to use environment variable to not store plain private key in config.
 accounts:
   acc1:
     privateKey: 0000000000000000000000000000000000000000000000000000000000000001
   acc2:
-    privateKey: 0000000000000000000000000000000000000000000000000000000000000002
+    privateKeyEnv: BOT_PRIVATE_KEY
 
 # List of interconnected liquidity pools used for rebalancing
 pools:
