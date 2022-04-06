@@ -274,6 +274,15 @@ func (b *bot) estimateDepositAndReward(ctx context.Context, p pool.Pool, maxDepo
 	}
 
 	liquidityDeficit := big.NewInt(0).Sub(suppliedLiquidity, currentLiquidity)
+	if liquidityDeficit.Cmp(big.NewInt(0)) < 0 {
+		level.Info(b.logger).Log("msg", "no rewards available")
+		return big.NewInt(0), big.NewInt(0), nil
+	}
+
+	if b.conf.HalfRebalancing {
+		liquidityDeficit = big.NewInt(0).Div(liquidityDeficit, big.NewInt(2))
+	}
+
 	deposit := utils.Min(maxDeposit, liquidityDeficit, tokenInfo.MaxCap)
 	deposit = utils.Max(deposit, tokenInfo.MinCap)
 

@@ -14,8 +14,9 @@ type Config struct {
 }
 
 type General struct {
-	UpdateInterval uint64 `yaml:"updateInterval"`
-	JobTimeout     uint64 `yaml:"jobTimeout"`
+	UpdateInterval  uint64 `yaml:"updateInterval"`
+	JobTimeout      uint64 `yaml:"jobTimeout"`
+	HalfRebalancing bool   `yaml:"halfRebalancing"`
 }
 
 type Network struct {

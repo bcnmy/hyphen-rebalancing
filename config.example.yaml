@@ -7,6 +7,8 @@ general:
   # Optional. Override default rabalancing job timeout.
   # If RPC endpoint is not responding, job will be canceled.
   jobTimeout: 60
+  # Optional. Estimate profits for half of liquidity pool deficit.
+  halfRebalancing: false
 
 # List of networks to use for rebalancing
 networks:
